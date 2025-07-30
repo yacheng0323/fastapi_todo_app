@@ -1,4 +1,10 @@
 from app.db.session import engine
 from app.models.todo import SQLModel
+from app.models.user import User
+from sqlmodel import SQLModel
 
-SQLModel.metadata.create_all(engine)
+def init():
+    SQLModel.metadata.create_all(engine)
+
+if __name__ == "__main__":
+    init()
