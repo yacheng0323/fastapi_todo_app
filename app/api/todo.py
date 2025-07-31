@@ -25,7 +25,7 @@ def read_todo(todo_id: uuid.UUID,session: Session = Depends(get_session)):
     todo = session.get(Todo,todo_id)
     if not todo:
         raise HTTPException(status_code=404,detail="Todo not found")
-    return todo;
+    return todo
 
 @router.put("/{todo_id}",response_model=TodoOut)
 def update_todo(todo_id: uuid.UUID,updated_todo: TodoUpdate,session: Session = Depends(get_session)):
