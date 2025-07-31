@@ -32,7 +32,7 @@ def update_todo(todo_id: uuid.UUID,updated_todo: TodoUpdate,session: Session = D
     todo = session.get(Todo,todo_id)
     if not todo:
         raise HTTPException(status_code=404,detail="Todo not found")
-    for key,value in todo_update.dict(exclude_unset=True).items():
+    for key,value in updated_todo.dict(exclude_unset=True).items():
         setattr(todo,key,value)
     session.add(todo)
     session.commit()

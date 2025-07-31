@@ -1,5 +1,5 @@
 from app.db.session import engine
-from app.models.todo import SQLModel
+from app.models.todo import Todo
 from app.models.user import User
 from sqlmodel import SQLModel
 
