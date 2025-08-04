@@ -1,6 +1,9 @@
-from typing import Optional
+from typing import Optional,List,TYPE_CHECKING
 from enum import Enum
-from sqlmodel import SQLModel, Field, Column, Enum as SQLEnum
+from sqlmodel import SQLModel, Field, Column, Enum as SQLEnum,Relationship
+
+if TYPE_CHECKING:
+    from .todo import Todo
 
 # 1. 定義用戶角色
 class UserRole(str, Enum):
@@ -15,6 +18,9 @@ class User(SQLModel, table=True):
     hashed_password: str
     role: UserRole = Field(sa_column=Column(SQLEnum(UserRole)), default=UserRole.user)
 
+    # 關係
+    todos: List["Todo"] = Relationship(back_populates="user")
+
 # 3. 註冊時接收的資料
 class UserCreate(SQLModel):
     username: str = Field(min_length=3, max_length=50)
@@ -27,3 +33,7 @@ class UserOut(SQLModel):
     username: str
     email: Optional[str] = None
     role: UserRole  # 改為 UserRole 類型
+
+# 5. 包含 todos 的用戶資料 (管理員用
+class UserOutWithTodos(UserOut):
+    todos: List["Todo"] = []
