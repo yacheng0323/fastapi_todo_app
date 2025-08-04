@@ -93,7 +93,7 @@ python main.py     # 啟動應用
 1. **UUID 處理**: PostgreSQL 對 UUID 的處理與 SQLite 不同，確保模型正確
 2. **時間戳**: PostgreSQL 有更嚴格的時間戳處理
 3. **外鍵約束**: PostgreSQL 對外鍵約束更嚴格
-4. **大小寫敏感**: PostgreSQL 對大小寫敏感
+4. **大小寫敏感**: PostgreSQL 對大小寫敏感,test
 
 ## 常見問題
 
