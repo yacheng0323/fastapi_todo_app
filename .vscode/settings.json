@@ -1,0 +1,14 @@
+{
+    "sqltools.connections": [
+        {
+            "previewLimit": 50,
+            "server": "localhost",
+            "port": 5432,
+            "driver": "PostgreSQL",
+            "name": "FastAPI DB",
+            "username": "yacheng",
+            "database": "fastapi_todo_db",
+            "password": "12345678"
+        }
+    ]
+}
