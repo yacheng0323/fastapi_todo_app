@@ -34,6 +34,14 @@ class TodoOut(TodoBase):
     created_at: datetime
     updated_at: datetime
 
+# 修復:使用簡化的用戶信息避免循環引用
+class SimpleUserInfo(SQLModel):
+    """ 簡化的用戶信息，避免循環引用"""
+    id: int
+    username: str
+    email: Optional[str] = None
+
 class TodoOutWithUser(TodoOut):
-     # 管理員查看時顯示用戶信息
-    user: Optional["User"] = None
+    """ 管理員查看時顯示用戶信息 - 簡化用戶信息"""
+    user: Optional[SimpleUserInfo] = None
+

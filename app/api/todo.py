@@ -2,7 +2,7 @@ import datetime
 from fastapi import APIRouter,Depends,HTTPException
 from sqlmodel import select
 from app.deps.users import get_current_user, required_admin
-from app.models.todo import Todo,TodoCreate,TodoOut, TodoOutWithUser,TodoUpdate
+from app.models.todo import SimpleUserInfo, Todo,TodoCreate,TodoOut, TodoOutWithUser,TodoUpdate
 from app.db.session import get_session
 from sqlmodel import Session
 import uuid
@@ -87,7 +87,9 @@ def admin_get_all_todos(session: Session = Depends(get_session),admin_user: User
     result = []
     for todo in todos:
         user = session.get(User,todo.user_id)
-        todo_with_user = TodoOutWithUser(**todo.model_dump(),user=user)
+        # 使用 SimpleUserInfo 來避免循環引用
+        simple_user = SimpleUserInfo(id=user.id,username=user.username,email=user.email) if user else None
+        todo_with_user = TodoOutWithUser(**todo.model_dump(),user=simple_user)
         result.append(todo_with_user)
     return result
 
