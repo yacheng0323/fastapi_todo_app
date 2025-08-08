@@ -1,10 +1,12 @@
 import datetime
-from fastapi import APIRouter,Depends,HTTPException
+from typing import Optional
+from fastapi import APIRouter,Depends,HTTPException,Query
 from sqlmodel import select
 from app.deps.users import get_current_user, required_admin
-from app.models.todo import SimpleUserInfo, Todo,TodoCreate,TodoOut, TodoOutWithUser,TodoUpdate
+from app.models.todo import SimpleUserInfo, Todo,TodoCreate,TodoOut, TodoOutWithUser,TodoUpdate, TodoSortBy, PaginatedTodoResponse
 from app.db.session import get_session
 from sqlmodel import Session
+from sqlalchemy import func,or_
 import uuid
 
 from app.models.user import User
@@ -25,6 +27,57 @@ def read_todos(session: Session = Depends(get_session), current_user: User = Dep
     """ 獲取當前用戶的所有 todos - 用戶隔離 """
     todos = session.exec(select(Todo).where(Todo.user_id == current_user.id)).all()
     return todos
+
+# 分頁
+@router.get("/search",response_model=PaginatedTodoResponse)
+def search_todos(
+    q: Optional[str] = None,
+    sort_by: TodoSortBy = TodoSortBy.created_at_desc,
+    page: int = Query(1,ge=1),
+    per_page: int = Query(10, ge=1, le=100),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user)
+):
+    # 基本條件:僅限當前用戶
+    conditions = [Todo.user_id == current_user.id]
+
+    # 關鍵字搜尋 (title / description 都支援，忽略大小寫)
+    if q: 
+        pattern = f"%{q}%"
+        conditions.append(or_(Todo.title.ilike(pattern),Todo.description.ilike(pattern)))
+
+    # 組出查詢 (先不分頁)
+    stmt = select(Todo).where(*conditions)
+
+    # 排序對應
+    order_by_map = {
+        TodoSortBy.created_at_asc: Todo.created_at.asc(),
+        TodoSortBy.created_at_desc: Todo.created_at.desc(),
+        TodoSortBy.updated_at_asc: Todo.updated_at.asc(),
+        TodoSortBy.updated_at_desc: Todo.updated_at.desc(),
+        TodoSortBy.title_asc: Todo.title.asc(),
+        TodoSortBy.title_desc: Todo.title.desc(),
+    }
+    stmt = stmt.order_by(order_by_map[sort_by])
+
+    # 總筆數 (未分頁前)
+    count_stmt = select(func.count()).select_from(Todo).where(*conditions)
+    total = session.exec(count_stmt).one()
+
+    # 分頁
+    offset = (page - 1) * per_page
+    items = session.exec(stmt.offset(offset).limit(per_page)).all()
+
+    # 總頁數
+    pages = (total + per_page - 1) // per_page if total else 0
+
+    return PaginatedTodoResponse(
+        items=items,
+        total=total,
+        page=page,
+        per_page=per_page,
+        pages=pages
+    )
 
 @router.get("/{todo_id}",response_model=TodoOut)
 def read_todo(todo_id: uuid.UUID,session: Session = Depends(get_session),current_user: User = Depends(get_current_user)):
@@ -54,7 +107,7 @@ def update_todo(todo_id: uuid.UUID,updated_todo: TodoUpdate,session: Session = D
     for key,value in updated_todo.dict(exclude_unset=True).items():
         setattr(todo,key,value)
 
-    todo.updated_at = datetime.now()
+    todo.updated_at = datetime.datetime.now()
 
     session.add(todo)
     session.commit()
@@ -113,4 +166,4 @@ def admin_delete_todo(todo_id:uuid.UUID,session: Session = Depends(get_session),
     session.delete(todo)
     session.commit()
     return {"msg": f"管理員 {admin_user.username} 已刪除 todo {todo_id}" }
-    
+

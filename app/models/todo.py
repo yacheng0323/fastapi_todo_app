@@ -3,6 +3,10 @@ from sqlmodel import SQLModel, Field, Relationship
 from datetime import datetime
 import uuid
 
+# 加上分頁功能
+from typing import List
+from enum import Enum
+
 if TYPE_CHECKING:
     from .user import User
 
@@ -45,3 +49,19 @@ class TodoOutWithUser(TodoOut):
     """ 管理員查看時顯示用戶信息 - 簡化用戶信息"""
     user: Optional[SimpleUserInfo] = None
 
+# 排序選項
+class TodoSortBy(str,Enum):
+    created_at_asc = "created_at_asc"
+    created_at_desc = "created_at_desc"
+    updated_at_asc = "updated_at_asc"
+    updated_at_desc = "updated_at_desc"
+    title_asc = "title_asc"
+    title_desc = "title_desc"
+
+# 分頁響應模型
+class PaginatedTodoResponse(SQLModel):
+    items: list[TodoOut]
+    total: int # 符合條件的 總筆數
+    page: int # 目前頁碼
+    per_page: int # 每頁筆數
+    pages: int # 總頁數
