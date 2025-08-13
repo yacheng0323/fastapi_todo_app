@@ -1,26 +1,34 @@
 import datetime
 from typing import Optional
-from fastapi import APIRouter,Depends,HTTPException,Query
-from sqlmodel import select
+from fastapi import APIRouter,Depends,HTTPException
+from sqlmodel import select,Session
 from app.deps.users import get_current_user, required_admin
-from app.models.todo import SimpleUserInfo, Todo,TodoCreate,TodoOut, TodoOutWithUser,TodoUpdate, TodoSortBy, PaginatedTodoResponse
+from app.models.todo import SimpleUserInfo, Todo,TodoCreate,TodoOut, TodoOutWithUser,TodoUpdate
 from app.db.session import get_session
-from sqlmodel import Session
 from sqlalchemy import func,or_
 import uuid
 
 from app.models.user import User
+
+# 導入統一錯誤處理
+from app.core.exceptions import todo_not_found, todo_access_denied, NotFoundError, PermissionError
 
 router = APIRouter()
 
 @router.post("/",response_model=TodoOut)
 def create_todo(todo: TodoCreate,session: Session = Depends(get_session),current_user: User = Depends(get_current_user)):
     """創建新的 todo - 自動關連到當前用戶"""
-    db_todo = Todo(**todo.model_dump(),user_id=current_user.id)
-    session.add(db_todo)
-    session.commit()
-    session.refresh(db_todo)
-    return db_todo
+    try:
+        db_todo = Todo(**todo.model_dump(),user_id=current_user.id)
+        session.add(db_todo)
+        session.commit()
+        session.refresh(db_todo)
+        return db_todo
+    except Exception as e:
+        session.rollback()
+        # 丟出我們的自定義例外，會被全域處理器捕獲
+        raise NotFoundError(resource="Todo", details={"error": str(e)})
+    
 
 @router.get("/",response_model=list[TodoOut])
 def read_todos(session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
@@ -28,67 +36,18 @@ def read_todos(session: Session = Depends(get_session), current_user: User = Dep
     todos = session.exec(select(Todo).where(Todo.user_id == current_user.id)).all()
     return todos
 
-# 分頁
-@router.get("/search",response_model=PaginatedTodoResponse)
-def search_todos(
-    q: Optional[str] = None,
-    sort_by: TodoSortBy = TodoSortBy.created_at_desc,
-    page: int = Query(1,ge=1),
-    per_page: int = Query(10, ge=1, le=100),
-    session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user)
-):
-    # 基本條件:僅限當前用戶
-    conditions = [Todo.user_id == current_user.id]
-
-    # 關鍵字搜尋 (title / description 都支援，忽略大小寫)
-    if q: 
-        pattern = f"%{q}%"
-        conditions.append(or_(Todo.title.ilike(pattern),Todo.description.ilike(pattern)))
-
-    # 組出查詢 (先不分頁)
-    stmt = select(Todo).where(*conditions)
-
-    # 排序對應
-    order_by_map = {
-        TodoSortBy.created_at_asc: Todo.created_at.asc(),
-        TodoSortBy.created_at_desc: Todo.created_at.desc(),
-        TodoSortBy.updated_at_asc: Todo.updated_at.asc(),
-        TodoSortBy.updated_at_desc: Todo.updated_at.desc(),
-        TodoSortBy.title_asc: Todo.title.asc(),
-        TodoSortBy.title_desc: Todo.title.desc(),
-    }
-    stmt = stmt.order_by(order_by_map[sort_by])
-
-    # 總筆數 (未分頁前)
-    count_stmt = select(func.count()).select_from(Todo).where(*conditions)
-    total = session.exec(count_stmt).one()
-
-    # 分頁
-    offset = (page - 1) * per_page
-    items = session.exec(stmt.offset(offset).limit(per_page)).all()
-
-    # 總頁數
-    pages = (total + per_page - 1) // per_page if total else 0
-
-    return PaginatedTodoResponse(
-        items=items,
-        total=total,
-        page=page,
-        per_page=per_page,
-        pages=pages
-    )
-
 @router.get("/{todo_id}",response_model=TodoOut)
 def read_todo(todo_id: uuid.UUID,session: Session = Depends(get_session),current_user: User = Depends(get_current_user)):
     """ 獲取特定 todo - 檢查所有權 """
     todo = session.get(Todo,todo_id)
     if not todo:
-        raise HTTPException(status_code=404,detail="Todo not found")
+        # 使用統一錯誤處理
+        raise todo_not_found(str(todo_id))
     
     # 🛡️ 檢查所有權：用戶只能訪問自己的 todo
     if todo.user_id != current_user.id:
-        raise HTTPException(status_code=403,detail="無權限訪問此 Todo")
+        # 使用統一錯誤處理
+        raise todo_access_denied(str(todo_id),current_user.id)
     
     return todo
 
@@ -97,37 +56,49 @@ def update_todo(todo_id: uuid.UUID,updated_todo: TodoUpdate,session: Session = D
     """ 更新 todo - 檢查所有權並自動更新時間戳記 """
     todo = session.get(Todo,todo_id)
     if not todo:
-        raise HTTPException(status_code=404,detail="Todo not found")
+        # 使用統一錯誤處理
+        raise todo_not_found(str(todo_id))
 
     # 檢查所有權:用戶只能更新自己的 todo
     if todo.user_id != current_user.id:
-        raise HTTPException(status_code=403,detail="無權限更新此 Todo")
+        raise todo_access_denied(str(todo_id),current_user.id)
 
-    # 更新字段
-    for key,value in updated_todo.dict(exclude_unset=True).items():
-        setattr(todo,key,value)
+    try:
+        # 更新字段
+        for key,value in updated_todo.model_dump(exclude_unset=True).items():
+            setattr(todo,key,value)
 
-    todo.updated_at = datetime.datetime.now()
+        todo.updated_at = datetime.datetime.now()
 
-    session.add(todo)
-    session.commit()
-    session.refresh(todo)
-    return todo
+        session.add(todo)
+        session.commit()
+        session.refresh(todo)
+        return todo
+    except Exception as e:
+        session.rollback()
+        # 如果更新失敗，丟出自定義例外
+        raise NotFoundError(resource="Todo 更新",details={"todo_id": str(todo_id), "error": str(e)})
+    
 
 @router.delete("/{todo_id}")
 def delete_todo(todo_id: uuid.UUID, session: Session = Depends(get_session),current_user: User = Depends(get_current_user)):
     """ 刪除 todo - 檢查所有權 """
     todo = session.get(Todo, todo_id)
     if not todo:
-        raise HTTPException(status_code=404, detail="Todo not found")
+        raise todo_not_found(str(todo_id))
     
     # 檢查所有權:用戶只能刪除自己的todo
     if todo.user_id != current_user.id:
-        raise HTTPException(status_code=403,detail="無權限刪除此 Todo")
+        raise todo_access_denied(str(todo_id),current_user.id) 
+
+    try:
+        session.delete(todo)
+        session.commit()
+        return {"msg": "Todo deleted successfully","deleted_by": current_user.username}
+    except Exception as e:
+        session.rollback()
+        raise NotFoundError(resource="Todo 刪除",details={"todo_id": str(todo_id), "error": str(e)})
     
-    session.delete(todo)
-    session.commit()
-    return {"msg": "Todo deleted successfully","deleted_by": current_user.username}
 
 # ============ 管理員專用端點 =============
 
@@ -151,7 +122,8 @@ def admin_get_user_todos(user_id:int, session: Session = Depends(get_session),ad
     """ 管理員查看特定用戶的所有 todos """
     user = session.get(User,user_id)
     if not user:
-        raise HTTPException(status_code=404,detail="用戶不存在")
+        raise NotFoundError(resource="用戶", details={"user_id":user_id}) 
+    
     
     todos = session.exec(select(Todo).where(Todo.user_id == user_id)).all()
     return todos
@@ -161,9 +133,13 @@ def admin_delete_todo(todo_id:uuid.UUID,session: Session = Depends(get_session),
     """ 管理員刪除任意 todo """
     todo = session.get(Todo,todo_id)
     if not todo:
-        raise HTTPException(status_code=404,detail="Todo not found")
-    
-    session.delete(todo)
-    session.commit()
-    return {"msg": f"管理員 {admin_user.username} 已刪除 todo {todo_id}" }
+        raise todo_not_found(str(todo_id))
+
+    try:
+        session.delete(todo)
+        session.commit()
+        return {"msg": f"管理員 {admin_user.username} 已刪除 todo {todo_id}" }
+    except Exception as e:
+        session.rollback()
+        raise NotFoundError(resource="管理員 Todo 刪除",details={"todo_id": str(todo_id), "admin":admin_user.username,"error": str(e)})
 
