@@ -69,4 +69,13 @@ async def health_check():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))  # Railway 會提供 PORT 環境變數
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
+    # 生產環境配置
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=port,
+        reload=False,
+        workers=1,  # Railway 建議單個容器使用單個 worker
+        access_log=True,
+        log_level="info",
+    )
